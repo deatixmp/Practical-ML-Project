@@ -1,0 +1,247 @@
+---
+title: "Practical Machine Learning Project"
+author: "David Faria"
+date: "January 31, 2016"
+output: html_document
+---
+
+# Loading Data
+
+#### Reading a few lines to get an idea of the data
+
+```{r, eval=FALSE}
+readLines("pml-training.csv",n=5)
+readLines("pml-training.csv",n=-5)
+```
+Missing values coded as NA, separator="," and text coded as "\"
+
+```{r, eval=FALSE}
+train <- read.csv("pml-training.csv", na.strings = c("NA"))
+```
+Using str(train) shows thatA lot of variables are coded as factor, while most of their levels are numeric. There seems to be "#DIV/0!" in the data.Reloading the data with this subtleties:
+
+```{r}
+train <- read.csv("pml-training.csv", na.strings = c("NA","#DIV/0!"))
+#seems to be ok now, loading testing data with these parameters
+test <- read.csv("pml-testing.csv", na.strings = c("NA","#DIV/0!"))
+```
+
+# Cleaning and checking data
+
+### Further data quality and transformation checks
+
+Checking for missing values:
+```{r}
+NApercentages<-colSums(is.na(train))/nrow(train)
+# How many variables have mainly unknown values?
+sum(NApercentages>=0.95) #100 variables! a lot
+# There is not much to do with these variables: filtering them out
+train <- train[,NApercentages<=0.95]
+dim(train) #Only 60 variables remaining
+# Checking
+NApercentages2<-colSums(is.na(train))/nrow(train)
+NApercentages2 #No more NA values
+```
+Variables that had more than 95% of missing values are not useful for prediction for many reasons, but mainly:
+* They have no variance
+* Their frequency ratio is extremely low
+* Even if missing values meant something, it is most likely that it is not useful.
+
+So, the same rules coming from the train set are applied to the test se. No checks are performed over the test set, or it would bias our anaysis.
+
+```{r}
+test <- test[,NApercentages<=0.95]
+
+```
+Checking data closely now that less variables are to be analyzed:
+
+```{r}
+str(train)
+```
+
+Some variables seem to have no use, such as the "X" variable. It's an index so let's filter it out.
+```{r, eval=FALSE}
+train <- train[,names(train)!="X"]
+test <- test[,names(test)!="X"]
+```
+
+  
+# Analysing variables
+
+#### Performing some quick visualization over factor variables
+There are just a few of them:
+```{r}
+names(train)[sapply(train,is.factor)]
+```
+
+So what about the **classe** variable to be predicted?
+
+```{r, echo=FALSE, fig.width=4, fig.height=4}
+library(ggplot2)
+qplot(train$classe) 
+```
+
+There are more class A cases than B, C, D, E, which are all at the same level
+
+* Checking classe by **user_name** : maybe an user performs better than the others?
+
+```{r, echo=FALSE, fig.width=4, fig.height=4}
+  ggplot(train,aes(x=user_name, fill=classe)) + geom_bar(position="dodge")
+```
+
+Some users different distributions than other, like pedro, who has almost as many 
+movements class A as B,C,D,E. While users like jeremy have mainly class A and C movements. 
+
+What's the distribution of the user_name? any need for pre-processing?
+
+```{r, fig.width=4, fig.height=4}
+qplot(train$user_name) 
+```
+Somewhat uniform distribution. The user_name variable is pertinent to be included in the analysis.
+
+* Let's check the **new_window** variable
+
+```{r, echo=FALSE, fig.width=4, fig.height=4}
+qplot(train$new_window) 
+```
+
+The value "yes" is over-represented. Is there a difference by classe of movement?
+
+```{r, echo=FALSE, fig.width=4, fig.height=4}
+ggplot(train,aes(x=classe, fill=new_window)) + geom_bar(position="dodge") + facet_grid(new_window~., scale = "free_y")
+```
+
+The "No" and "yes" values have same variability for all classes
+
+What about by user?
+
+```{r, echo=FALSE, fig.width=4, fig.height=4}
+ggplot(train,aes(x=classe, fill=new_window)) + geom_bar(position="dodge") + facet_grid(new_window~user_name, scale = "free_y")
+```
+
+Although the "new_window" variable changes distributions of some users, so it is better to keep it in
+
+* Checking a few distributions in order to get some perspective of variables importance and "usability"
+
+```{r, echo=FALSE, fig.width=4, fig.height=4}
+ggplot(train,aes(x=total_accel_belt, fill=user_name)) + geom_bar()
+```
+
+The distribution presents two gaussian-like courbes, which are just due to different users. This is a proof that including the user name is very important. Features variability change for user to user
+
+* Checking a few last vairables:
+
+```{r, echo=FALSE, fig.width=2, fig.height=2}
+ggplot(train,aes(x=gyros_belt_x)) + geom_bar()
+ggplot(train,aes(x=gyros_belt_y)) + geom_bar()
+ggplot(train,aes(x=accel_arm_x)) + geom_bar()  
+```
+
+  All with beatiful distributions from the accelerometers... So everything looks good, let's move forward to creating a model
+
+# Modelisation phase
+
+First, some pre-processing:
+
+### Pre-processing
+
+* **Checking near-zero variance variables**
+
+```{r, eval=FALSE}
+library(caret)
+nearZeroVar(train,saveMetrics = TRUE)
+```
+
+"new_window" is the only near zero variance variable. We've seen this before, but decide to keep it since the variable seems to have some relationship with classe, when split by user_name.
+
+Let's check some general statistics from the data:
+
+```{r, eval=FALSE}
+summary(train)
+```
+
+**==>** Some variables have very large values (>1000) while others are between (-5,5)
+
+#### Standardization might be needed. 
+Building preprocessing object, and applying it to train & test datasets
+```{r,eval=FALSE}
+preProc <- preProcess(train, method = c("center","scale"))
+trainPreProc <- predict(preProc, train)
+testPreProc <- predict(preProc, test)
+```
+
+Now that everything is set, the data is clean and preprocessed, let's train some models:
+
+```
+set.seed(10)
+```
+The train dataset is not modified, and used in it's totality. To estimate the generalization error, other technique wil be used:
+
+The caret package takes care of cross-validation. By default it applies a bootstrap cross validation, which will give us the out-of-sample or generalizastion error.
+
+#### Training a simple CART tree
+
+```{r, eval=FALSE}
+  cart <- train(classe~., method="rpart", data=train)
+  #Default bootstrapping used
+  cart
+```
+What's the Accuracy? 
+```
+  cart$results[2]
+```
+Now, even though the accuracy is really low,we can predict over the test observations.
+```
+  cartpred <- predict(cart, test)
+  cartpred
+```
+
+The same exact process is repeated for the CART model trained in the preprocessed data. The same transformation is applied to the test data to get the predictions
+```
+#With transformation (standardization)
+  cartPreProc <- train(classe~., method="rpart", data=trainPreProc)
+  cartPreProc
+  #printing Accuracy
+  cartPreProc$results[2]
+  #==> Slightly better Accuracy with preprocessing
+  #Predicting test
+  cartpredPreProc <- predict(cartPreProc, testPreProc)
+  cartpredPreProc
+```
+
+**==>** The performance of CART (accuracy ~= 50%) is pretty low whether with preprocessing or not.
+
+Now the same exact process is repeated for LDA
+
+### Training a linear discriminant analysis
+```{r, eval=FALSE}
+#training linear discriminant analysis
+lda <- train(classe~., method="lda", data=train)
+  lda
+  #printing Accuracy
+  lda$results[2]
+  #Predicting test
+  ldapred <- predict(lda, test)
+#With transformation (standardization)
+ldaPreProc <- train(classe~., method="lda", data=trainPreProc)
+  ldaPreProc
+  #printing Accuracy
+  ldaPreProc$results[2]
+  #==> Slightly better Accuracy with preprocessing
+  #Predicting test
+  ldapredPreProc <- predict(ldaPreProc, testPreProc)
+```
+
+**==>** Accuracy is considerably larger with LDA than CART (85% vs 50%). It also improves with preprocessing (85.423% and 85.475%). 
+
+So wrapping up the results, this gives:
+
+Method       | Dataset      | Accuracy
+------------ | -------------|------------
+LDA          | Raw          |0.8542367
+LDA          | Preprocesssed|**0.8547509**
+CART         | Raw          |0.5152305
+CART         | Preprocesssed|0.5105094
+
+
+The best model is LDA with pre-processed data. In practice, another SVM model was trained, which gave perfect prediction results.
