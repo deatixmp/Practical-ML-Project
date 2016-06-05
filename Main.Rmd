@@ -1,12 +1,10 @@
-# Practical Machine Learning Project
-Coursera
 
----
-title: "Practical Machine Learning Project"
+# Practical Machine Learning Course Project
+
+Coursera
 author: "David Faria"
 date: "January 31, 2016"
-output: html_document
----
+
 
 # Loading Data
 
