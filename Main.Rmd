@@ -1,3 +1,6 @@
+# Practical Machine Learning Project
+Coursera
+
 ---
 title: "Practical Machine Learning Project"
 author: "David Faria"
